@@ -164,11 +164,17 @@ status(#{status := Status}) -> Status.
 -spec body(response()) -> binary().
 body(#{body := Body}) -> Body.
 
--spec json(response()) -> map().
+-spec json(response()) -> json:decode_value().
 json(#{body := Body}) ->
-    JsonLib = json_lib(),
-    {ok, Decoded} = JsonLib:decode(Body),
-    Decoded.
+    decode_json(json_lib(), Body).
+
+decode_json(json, Body) ->
+    json:decode(Body);
+decode_json(JsonLib, Body) ->
+    case JsonLib:decode(Body) of
+        {ok, Decoded} -> Decoded;
+        {error, _} = Err -> error(Err)
+    end.
 
 -spec headers(response()) -> [{string(), string()}].
 headers(#{headers := Headers}) -> Headers.
@@ -239,13 +245,8 @@ build_headers(_) ->
 
 build_request(URL, Headers, #{json := Json}) ->
     JsonLib = json_lib(),
-    Body = JsonLib:encode(Json),
-    BodyStr =
-        case Body of
-            B when is_binary(B) -> binary_to_list(B);
-            B when is_list(B) -> B
-        end,
-    {URL, Headers, "application/json", BodyStr};
+    Body = iolist_to_binary(JsonLib:encode(Json)),
+    {URL, Headers, "application/json", binary_to_list(Body)};
 build_request(URL, Headers, #{multipart := Fields}) ->
     Boundary = generate_boundary(),
     Body = iolist_to_binary(build_multipart_body(Fields, Boundary)),
@@ -262,9 +263,9 @@ build_request(URL, Headers, _) ->
 
 json_lib() ->
     try
-        nova:get_env(json_lib, thoas)
+        nova:get_env(json_lib, json)
     catch
-        _:_ -> thoas
+        _:_ -> json
     end.
 
 cookie_header(Config) ->
@@ -323,7 +324,7 @@ maybe_log(Method, Path, Opts, #{status := Status, headers := RespHeaders, body :
                 case Opts of
                     #{json := Json} ->
                         JsonLib = json_lib(),
-                        JsonLib:encode(Json);
+                        iolist_to_binary(JsonLib:encode(Json));
                     #{body := B} ->
                         B;
                     _ ->
